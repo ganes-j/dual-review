@@ -1,0 +1,5 @@
+state/
+*.log
+.env
+__pycache__/
+config/allowlist.json

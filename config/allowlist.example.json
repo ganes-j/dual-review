@@ -1,0 +1,6 @@
+{
+  "watch": [],
+  "allow": ["your-username/*"],
+  "deny": ["your-work-org"],
+  "manual_allow": []
+}
