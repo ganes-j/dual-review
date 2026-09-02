@@ -1,6 +1,8 @@
 import re
 import subprocess
 
+import hermes_runner
+
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.+?)```", re.DOTALL)
 _REQUIRED = ("file", "severity", "title", "body")
 
@@ -77,6 +79,11 @@ def review_with_claude(diff, template, claude_bin="claude"):
     return normalize_findings(proc.stdout, "claude")
 
 
+def review_with_hermes(diff, template, model):
+    raw = hermes_runner.run(_build_prompt(template, diff), model=model)
+    return normalize_findings(raw, "hermes")
+
+
 def review_with_codex(diff, template, repo_dir, codex_bin="codex"):
     proc = subprocess.run(
         [codex_bin, "exec", "-s", "read-only", "--skip-git-repo-check",
@@ -86,9 +93,12 @@ def review_with_codex(diff, template, repo_dir, codex_bin="codex"):
     return normalize_findings(proc.stdout, "codex")
 
 
-def dual_review(diff, repo_dir, template, router_off=False):
+def dual_review(diff, repo_dir, template, router_off=False, primary_runner="claude", hermes_model=None):
     """Run both reviewers independently; skip Codex when the router kill switch is set."""
-    findings = review_with_claude(diff, template)
+    if primary_runner == "hermes":
+        findings = review_with_hermes(diff, template, hermes_model)
+    else:
+        findings = review_with_claude(diff, template)
     if not router_off:
         findings += review_with_codex(diff, template, repo_dir)
     return findings

@@ -17,7 +17,7 @@ Each tick, for every repo in the `watch` list:
 ## Requirements
 
 - macOS (launchd) for the scheduled watcher; the CLI runs anywhere with Python 3.
-- Authenticated `gh`, `claude`, and `codex` CLIs on your `PATH`.
+- Authenticated `gh` and `codex` CLIs on your `PATH`, plus either `claude` (the default primary runner) **or** Hermes (see below).
 - Python 3 standard library only — no pip dependencies.
 
 ## Setup
@@ -68,6 +68,27 @@ python3 lib/orchestrator.py --repo your-username/dual-review --pr 1 --force 1   
 ```
 
 `--pr` requires `--repo` (single-PR targeting is scoped to one repo).
+
+## Hermes primary runner (opt-in)
+
+The default remains Claude + Codex. To run Hermes as the primary review, refutation,
+and resolution lane, select it explicitly and name its model:
+
+```bash
+python3 lib/orchestrator.py --once \
+  --primary-runner hermes \
+  --hermes-model anthropic/claude-sonnet-4
+```
+
+Hermes receives each prompt through stdin in an isolated, safe-mode one-shot session;
+project rules, plugins, and MCP servers are not loaded. Its output is schema-validated in
+the same way as the Claude output. `--hermes-model` is required deliberately: choose a
+model/provider independent from the Codex lane, or the confidence tiers would no longer be
+cross-model evidence. Use a model identifier accepted by `hermes chat --help` and available
+through your own Hermes authentication; no API key is added by dual-review.
+
+The bundled `bin/watch.sh` includes the usual Hermes install locations (`~/.local/bin` and
+`~/.hermes/hermes-agent/venv/bin`) in its launchd PATH.
 
 ## Manual review of a manual_allow repo
 

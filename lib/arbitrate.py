@@ -2,6 +2,8 @@ import json
 import re
 import subprocess
 
+import hermes_runner
+
 
 _FENCE_RE = re.compile(r"```(?:json)?\s*(.+?)```", re.DOTALL)
 _VERDICTS = ("confirm", "refute", "unsure")
@@ -120,7 +122,7 @@ def _verdict_map(verdicts):
     return {index: verdict for index, verdict in valid if counts[index] == 1}
 
 
-def tier_findings(claude_findings, codex_findings, refute_verdicts=None):
+def tier_findings(claude_findings, codex_findings, refute_verdicts=None, primary_model="claude"):
     """Dedupe cross-model findings and assign confidence tiers.
 
     ``refute_verdicts`` maps the reviewing model name to its verdict list:
@@ -160,8 +162,8 @@ def tier_findings(claude_findings, codex_findings, refute_verdicts=None):
         log.append({"kind": "ambiguous", "pairs": ambiguous_pairs})
 
     verdicts = refute_verdicts if isinstance(refute_verdicts, dict) else {}
-    codex_on_claude = _verdict_map(verdicts.get("codex"))
-    claude_on_codex = _verdict_map(verdicts.get("claude"))
+    codex_on_primary = _verdict_map(verdicts.get("codex"))
+    primary_on_codex = _verdict_map(verdicts.get(primary_model))
     output = []
 
     for index, finding in enumerate(claude_findings):
@@ -169,18 +171,18 @@ def tier_findings(claude_findings, codex_findings, refute_verdicts=None):
         if index in matches:
             item["tier"] = "high"
         else:
-            verdict = codex_on_claude.get(index)
+            verdict = codex_on_primary.get(index)
             item["tier"] = ("high" if verdict == "confirm" else
                             "disagreement" if verdict == "refute" else "uncertain")
             if index not in ambiguous_claude:
-                log.append({"kind": "unmatched", "model": "claude", "index": index})
+                log.append({"kind": "unmatched", "model": primary_model, "index": index})
         output.append(item)
 
     for index, finding in enumerate(codex_findings):
         if index in matched_codex:
             continue
         item = dict(finding)
-        verdict = claude_on_codex.get(index)
+        verdict = primary_on_codex.get(index)
         item["tier"] = ("high" if verdict == "confirm" else
                         "disagreement" if verdict == "refute" else "uncertain")
         output.append(item)
@@ -206,6 +208,11 @@ def refute_with_claude(other_findings, template, claude_bin="claude"):
     return normalize_verdicts(proc.stdout, len(other_findings))
 
 
+def refute_with_hermes(other_findings, template, model):
+    raw = hermes_runner.run(_build_prompt(template, other_findings), model=model)
+    return normalize_verdicts(raw, len(other_findings))
+
+
 def refute_with_codex(other_findings, template, repo_dir, codex_bin="codex"):
     proc = subprocess.run(
         [codex_bin, "exec", "-s", "read-only", "--skip-git-repo-check",
@@ -215,9 +222,15 @@ def refute_with_codex(other_findings, template, repo_dir, codex_bin="codex"):
     return normalize_verdicts(proc.stdout, len(other_findings))
 
 
-def cross_refute(claude_findings, codex_findings, template, repo_dir):
+def cross_refute(primary_findings, codex_findings, template, repo_dir,
+                 primary_runner="claude", hermes_model=None):
     """Have each model assess only the other model's independent findings."""
+    if primary_runner == "hermes":
+        return {
+            "hermes": refute_with_hermes(codex_findings, template, hermes_model),
+            "codex": refute_with_codex(primary_findings, template, repo_dir),
+        }
     return {
         "claude": refute_with_claude(codex_findings, template),
-        "codex": refute_with_codex(claude_findings, template, repo_dir),
+        "codex": refute_with_codex(primary_findings, template, repo_dir),
     }

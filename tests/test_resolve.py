@@ -213,6 +213,16 @@ class TestJudgeReply(unittest.TestCase):
         with mock.patch.object(resolve.subprocess, "run", return_value=self._proc("usage limit reached")):
             self.assertIsNone(resolve.judge_reply(_finding(), "fix it", "diff", "TEMPLATE"))
 
+    @mock.patch.object(resolve.hermes_runner, "run",
+                       return_value='{"intent":"agree","still_valid":true,"fix_kind":"none","message":"m"}')
+    def test_hermes_primary_runner_judges_with_explicit_model(self, run):
+        judgment = resolve.judge_reply(_finding(), "fix it", "diff", "TEMPLATE",
+                                       primary_runner="hermes", hermes_model="anthropic/claude-sonnet-4")
+
+        self.assertEqual(judgment["intent"], "agree")
+        self.assertEqual(run.call_args.kwargs["model"], "anthropic/claude-sonnet-4")
+        self.assertIn("<untrusted-author-reply>", run.call_args.args[0])
+
 
 if __name__ == "__main__":
     unittest.main()
