@@ -2,10 +2,10 @@
 # launchd entry for dual-review: run ONE orchestrator tick, then exit.
 # launchd owns the interval (StartInterval in the plist). This script sets an
 # explicit PATH because a launchd agent does NOT inherit the login-shell PATH,
-# so gh/claude/codex (in /opt/homebrew/bin and ~/.volta/bin) would otherwise be
-# unresolvable. Logs to a mode-600 file, scrubs secret-shaped strings, rotates,
+# so gh/claude/codex/hermes (in Homebrew, Volta, or Hermes' standard venv) would
+# otherwise be unresolvable. Logs to a mode-600 file, scrubs secret-shaped strings, rotates,
 # and alerts loudly on failure instead of stopping silently.
-export PATH="/opt/homebrew/bin:$HOME/.volta/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="$HOME/.local/bin:$HOME/.hermes/hermes-agent/venv/bin:/opt/homebrew/bin:$HOME/.volta/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LOG="$ROOT/state/watch.log"
 

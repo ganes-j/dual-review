@@ -5,7 +5,7 @@ description: Cross-model (Claude + Codex) adversarial PR reviewer + resolution l
 
 # dual-review
 
-A local, keyless watcher that reviews PRs on your personal repos with **both Claude and Codex**, has each model refute the other's findings, and posts a single confidence-grouped review (inline comments only for findings both models back). No API keys — it uses your existing `gh`, `claude`, and `codex` logins. The auto watcher never touches denied (e.g. work) repos — the fail-closed scope gate blocks them. A specific PR on a denied repo can be reviewed only by an explicit, opt-in **manual run** (see below).
+A local, keyless watcher that reviews PRs on your personal repos with **both Claude and Codex**, has each model refute the other's findings, and posts a single confidence-grouped review (inline comments only for findings both models back). No API keys — by default it uses your existing `gh`, `claude`, and `codex` logins. It can instead run Hermes as the primary lane with an explicit model selection (below). The auto watcher never touches denied (e.g. work) repos — the fail-closed scope gate blocks them. A specific PR on a denied repo can be reviewed only by an explicit, opt-in **manual run** (see below).
 
 ## The on-switch is yours
 
@@ -28,6 +28,21 @@ python3 lib/orchestrator.py --repo your-username/dual-review        # scope one 
 python3 lib/orchestrator.py --repo your-username/dual-review --pr 1  # review exactly PR #1
 python3 lib/orchestrator.py --repo your-username/dual-review --pr 1 --force 1   # re-review PR #1 even if already marked
 ```
+
+## Use Hermes as the primary lane (opt-in)
+
+The default is Claude + Codex. To use Hermes for the primary review, cross-refutation,
+and resolution lane, make both the runner and model explicit:
+
+```bash
+python3 lib/orchestrator.py --once \
+  --primary-runner hermes \
+  --hermes-model anthropic/claude-sonnet-4
+```
+
+`--hermes-model` is required so the primary lane is deliberately independent from Codex.
+Hermes receives the prompt on stdin in a safe-mode one-shot session; project rules, plugins,
+and MCP servers are not loaded. The bundled watcher PATH includes common Hermes install paths.
 
 ## Manual review of a manual_allow repo
 

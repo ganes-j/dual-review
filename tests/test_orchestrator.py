@@ -221,7 +221,8 @@ class TestOrchestrator(unittest.TestCase):
             orchestrator.main(["--repo", "your-username/dual-review", "--pr", "5"])
 
         run_once.assert_called_once_with(
-            dry_run=False, force_pr=None, only_repo="your-username/dual-review", only_pr=5, codex=False)
+            dry_run=False, force_pr=None, only_repo="your-username/dual-review", only_pr=5, codex=False,
+            primary_runner="claude", hermes_model=None)
 
 
 import discovery  # noqa: E402
@@ -343,6 +344,16 @@ class TestCodexGating(unittest.TestCase):
         with mock.patch.object(orchestrator, "run_once") as run_once:
             orchestrator.main(["--repo", "your-work-org/manual-review", "--pr", "5", "--codex"])
         self.assertTrue(run_once.call_args.kwargs["codex"])
+
+    def test_main_threads_hermes_runner_and_model(self):
+        with mock.patch.object(orchestrator, "run_once") as run_once:
+            orchestrator.main(["--primary-runner", "hermes", "--hermes-model", "anthropic/claude-sonnet-4"])
+        self.assertEqual(run_once.call_args.kwargs["primary_runner"], "hermes")
+        self.assertEqual(run_once.call_args.kwargs["hermes_model"], "anthropic/claude-sonnet-4")
+
+    def test_hermes_runner_requires_an_explicit_model(self):
+        with self.assertRaises(SystemExit):
+            orchestrator.main(["--primary-runner", "hermes"])
 
 
 class TestManualAudit(unittest.TestCase):

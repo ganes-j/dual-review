@@ -2,6 +2,7 @@ import json
 import re
 import subprocess
 
+import hermes_runner
 from scrub import scrub_secrets
 
 _INTENTS = ("agree", "dismiss", "question")
@@ -188,11 +189,15 @@ def _build_judge_prompt(template, finding, reply_body, diff):
     ).format(template, finding_json, reply_body, diff)
 
 
-def judge_reply(finding, reply_body, diff, template, claude_bin="claude"):
-    """Run the single Claude judge over one reply; None on any unparseable output (defer)."""
+def judge_reply(finding, reply_body, diff, template, claude_bin="claude",
+                primary_runner="claude", hermes_model=None):
+    """Run the configured primary judge; None on any unparseable output (defer)."""
+    prompt = _build_judge_prompt(template, finding, reply_body, diff)
+    if primary_runner == "hermes":
+        return normalize_judgment(hermes_runner.run(prompt, model=hermes_model))
     try:
         proc = subprocess.run(
-            [claude_bin, "-p", _build_judge_prompt(template, finding, reply_body, diff)],
+            [claude_bin, "-p", prompt],
             capture_output=True, text=True,
         )
     except OSError:

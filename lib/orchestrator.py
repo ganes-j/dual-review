@@ -47,23 +47,27 @@ def watch_list(config_path):
     return list(watch) if isinstance(watch, list) else []
 
 
-def review_pr(repo, pr, diff, repo_dir, router_off):
-    """Full per-PR pipeline: dual review -> cross-refute -> tier -> post. Returns findings count."""
+def review_pr(repo, pr, diff, repo_dir, router_off, primary_runner="claude", hermes_model=None):
+    """Full pipeline: dual review -> cross-refute -> tier -> post."""
     review_tmpl = _read(REVIEW_PROMPT)
     refute_tmpl = _read(REFUTE_PROMPT)
-    findings = review.dual_review(diff, repo_dir, review_tmpl, router_off=router_off)
-    claude_f = [f for f in findings if f.get("model") == "claude"]
+    findings = review.dual_review(diff, repo_dir, review_tmpl, router_off=router_off,
+                                  primary_runner=primary_runner, hermes_model=hermes_model)
+    primary_f = [f for f in findings if f.get("model") == primary_runner]
     codex_f = [f for f in findings if f.get("model") == "codex"]
     verdicts = {}
-    if claude_f and codex_f and not router_off:
-        verdicts = arbitrate.cross_refute(claude_f, codex_f, refute_tmpl, repo_dir)
-    tiered, _matchlog = arbitrate.tier_findings(claude_f, codex_f, verdicts)
+    if primary_f and codex_f and not router_off:
+        verdicts = arbitrate.cross_refute(primary_f, codex_f, refute_tmpl, repo_dir,
+                                          primary_runner=primary_runner, hermes_model=hermes_model)
+    tiered, _matchlog = arbitrate.tier_findings(primary_f, codex_f, verdicts,
+                                                primary_model=primary_runner)
     payload = post.build_review_payload(tiered, pr, diff)
     post.submit_review(repo, pr, payload)
     return len(tiered)
 
 
-def resolve_pr(repo, pr, login, judge_tmpl, state_path, dry_run=False):
+def resolve_pr(repo, pr, login, judge_tmpl, state_path, dry_run=False,
+               primary_runner="claude", hermes_model=None):
     """Pass 2: advance the resolution loop on one reviewed, open PR. Returns replies handled.
 
     Judge each unprocessed author reply, re-verify the finding, and post a suggestion,
@@ -82,7 +86,8 @@ def resolve_pr(repo, pr, login, judge_tmpl, state_path, dry_run=False):
             _log("  would resolve reply %s on %s#%s (finding: %s)"
                  % (item["reply_id"], repo, pr, item["finding"].get("file")))
             continue
-        judgment = resolve.judge_reply(item["finding"], item["reply_body"], diff, judge_tmpl)
+        judgment = resolve.judge_reply(item["finding"], item["reply_body"], diff, judge_tmpl,
+                                       primary_runner=primary_runner, hermes_model=hermes_model)
         decision = resolve.decide_action(judgment, item["finding"])
         if decision["action"] == "defer":
             _log("  defer reply %s on %s#%s (could not judge — retry next tick)"
@@ -102,7 +107,8 @@ def resolve_pr(repo, pr, login, judge_tmpl, state_path, dry_run=False):
 
 
 def run_once(config_path=CONFIG_PATH, state_path=STATE_PATH, repo_dir=_ROOT,
-             dry_run=False, force_pr=None, only_repo=None, only_pr=None, codex=False):
+             dry_run=False, force_pr=None, only_repo=None, only_pr=None, codex=False,
+             primary_runner="claude", hermes_model=None):
     manual_run = False
     if only_repo is None:
         repos = watch_list(config_path)
@@ -123,12 +129,13 @@ def run_once(config_path=CONFIG_PATH, state_path=STATE_PATH, repo_dir=_ROOT,
         return
     login = ghio.gh_login()
     router_off = os.path.exists(ROUTER_OFF)
+    primary_label = "Hermes" if primary_runner == "hermes" else "Claude"
     if router_off:
-        _log("router kill switch present — Codex lane disabled (Claude-only)")
+        _log("router kill switch present — Codex lane disabled (%s-only)" % primary_label)
     codex_suppressed = router_off or (manual_run and not codex)
     if manual_run and not router_off:
         _log("manual review of %s — %s" % (
-            only_repo, "Codex enabled (--codex)" if codex else "Claude-only (pass --codex for Codex)"))
+            only_repo, "Codex enabled (--codex)" if codex else "%s-only (pass --codex for Codex)" % primary_label))
     try:
         judge_tmpl = _read(JUDGE_PROMPT)
     except OSError:
@@ -153,11 +160,12 @@ def run_once(config_path=CONFIG_PATH, state_path=STATE_PATH, repo_dir=_ROOT,
                 continue
             if manual_run:
                 # Record the egress before it happens: if the audit write fails,
-                # no Codex/Claude egress occurs without a durable record.
+                # no primary/Codex egress occurs without a durable record.
                 audit.append_manual_review(
                     MANUAL_AUDIT_PATH, repo, pr,
-                    "claude" if codex_suppressed else "claude+codex")
-            n = review_pr(repo, pr, diff, repo_dir, codex_suppressed)
+                    primary_runner if codex_suppressed else primary_runner + "+codex")
+            n = review_pr(repo, pr, diff, repo_dir, codex_suppressed,
+                          primary_runner=primary_runner, hermes_model=hermes_model)
             st = state.load(state_path)
             state.mark_reviewed(st, repo, pr, {"findings": n})
             state.save(state_path, st)
@@ -175,7 +183,8 @@ def run_once(config_path=CONFIG_PATH, state_path=STATE_PATH, repo_dir=_ROOT,
                 continue
             if not discovery.has_tool_review(reviews_by_pr.get(num, []), num, login):
                 continue
-            handled = resolve_pr(repo, num, login, judge_tmpl, state_path, dry_run=dry_run)
+            handled = resolve_pr(repo, num, login, judge_tmpl, state_path, dry_run=dry_run,
+                                primary_runner=primary_runner, hermes_model=hermes_model)
             if handled:
                 _log("  advanced %s#%s: %d repl%s handled"
                      % (repo, num, handled, "y" if handled == 1 else "ies"))
@@ -191,12 +200,19 @@ def main(argv=None):
                     help="restrict this run to a single PR number")
     ap.add_argument("--force", type=int, metavar="PR", help="re-review this PR number even if already marked")
     ap.add_argument("--codex", action="store_true",
-                    help="enable the Codex lane for a manual_allow repo (default Claude-only)")
+                    help="enable the Codex lane for a manual_allow repo (default primary-only)")
+    ap.add_argument("--primary-runner", choices=("claude", "hermes"), default="claude",
+                    help="primary review and resolution runner (default: claude)")
+    ap.add_argument("--hermes-model", metavar="MODEL",
+                    help="explicit Hermes model when --primary-runner hermes")
     args = ap.parse_args(argv)
+    if args.primary_runner == "hermes" and not args.hermes_model:
+        ap.error("--primary-runner hermes requires --hermes-model to preserve model independence")
     if args.pr is not None and not args.repo:
         ap.error("--pr requires --repo (single-PR targeting is scoped to one repo)")
     run_once(dry_run=args.dry_run, force_pr=args.force, only_repo=args.repo,
-             only_pr=args.pr, codex=args.codex)
+             only_pr=args.pr, codex=args.codex, primary_runner=args.primary_runner,
+             hermes_model=args.hermes_model)
 
 
 if __name__ == "__main__":

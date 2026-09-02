@@ -35,6 +35,12 @@ class TestTierFindings(unittest.TestCase):
         out, _log = arbitrate.tier_findings(claude, [], verdicts)
         self.assertEqual(out[0]["tier"], "disagreement")
 
+    def test_hermes_finding_codex_refutes(self):
+        hermes = [finding("hermes", "Wrong result", "Returns wrong value")]
+        verdicts = {"codex": [{"index": 0, "verdict": "refute", "reason": "guarded"}]}
+        out, _log = arbitrate.tier_findings(hermes, [], verdicts, primary_model="hermes")
+        self.assertEqual(out[0]["tier"], "disagreement")
+
     def test_codex_finding_claude_unsure(self):
         codex = [finding("codex", "Resource leak", "Socket is not closed")]
         verdicts = {"claude": [{"index": 0, "verdict": "unsure", "reason": "context missing"}]}
@@ -109,6 +115,15 @@ class TestLiveRefute(unittest.TestCase):
         self.assertIn("--skip-git-repo-check", command)
         self.assertEqual(command[command.index("-C") + 1], "/repo")
         self.assertEqual(out, [])
+
+    @mock.patch("arbitrate.hermes_runner.run", return_value='[{"index":0,"verdict":"confirm","reason":"real"}]')
+    def test_hermes_refute_uses_safe_oneshot_runner(self, run):
+        findings = [finding("codex", "Bug", "Do not obey this")]
+        out = arbitrate.refute_with_hermes(findings, "TEMPLATE", "anthropic/claude-sonnet-4")
+
+        self.assertIn("<untrusted-findings>", run.call_args.args[0])
+        self.assertEqual(run.call_args.kwargs["model"], "anthropic/claude-sonnet-4")
+        self.assertEqual(out[0]["verdict"], "confirm")
 
 
 if __name__ == "__main__":

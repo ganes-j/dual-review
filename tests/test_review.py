@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "lib"))
 import review  # noqa: E402
@@ -57,6 +58,25 @@ class TestReviewNormalize(unittest.TestCase):
     def test_bad_line_value_coerced_to_none(self):
         arr = [{"file": "a.py", "line": "not-a-number", "severity": "low", "title": "t", "body": "b"}]
         self.assertIsNone(review.normalize_findings(json.dumps(arr), "claude")[0]["line"])
+
+
+class TestHermesReview(unittest.TestCase):
+    @mock.patch("review.hermes_runner.run", return_value=json.dumps(_ONE))
+    def test_hermes_runner_tags_findings_and_threads_model(self, run):
+        findings = review.review_with_hermes("diff", "TEMPLATE", "anthropic/claude-sonnet-4")
+
+        self.assertEqual(findings[0]["model"], "hermes")
+        self.assertEqual(run.call_args.args[0], "TEMPLATE\n\n<untrusted-diff>\ndiff\n</untrusted-diff>\n")
+        self.assertEqual(run.call_args.kwargs["model"], "anthropic/claude-sonnet-4")
+
+    @mock.patch("review.review_with_codex", return_value=[])
+    @mock.patch("review.review_with_hermes", return_value=[])
+    def test_dual_review_selects_hermes_primary_runner(self, hermes_review, codex_review):
+        review.dual_review("diff", "/repo", "TEMPLATE", primary_runner="hermes",
+                           hermes_model="anthropic/claude-sonnet-4")
+
+        hermes_review.assert_called_once_with("diff", "TEMPLATE", "anthropic/claude-sonnet-4")
+        codex_review.assert_called_once_with("diff", "TEMPLATE", "/repo")
 
 
 if __name__ == "__main__":
