@@ -14,7 +14,7 @@ Building the tool does **not** turn it on. It only reviews PRs once you load the
 ## Configure
 
 `config/allowlist.json` (copy from `config/allowlist.example.json`; it's gitignored so your repo list stays local):
-- `watch` — the repos it polls each tick. Add repos here when you want them reviewed.
+- `watch` — the repos it polls each tick. Add repos here when you want them reviewed. An entry may end in a glob (`your-username/project-*`): each tick it is matched against the owner's unarchived repos, so a new matching repo is reviewed with no config edit. Every match must still pass `allow`/`deny`. Avoid a bare `owner/*` unless every repo under that owner should have its diffs sent to both models.
 - `allow` — the safety gate (owner globs, e.g. `your-username/*`). A watched repo must also pass this.
 - `deny` — hard-denied owners (e.g. `your-work-org`). Deny always wins on the auto path. A missing/empty allow or deny list fails closed (nothing runs).
 - `manual_allow` — exact `owner/name` repos (no globs) reachable **only** by an explicit manual run naming the exact repo and PR. Never polled, never in the auto candidate set. This is how a specific denied-owner PR is reviewed on demand; `deny` still blocks that same repo on the auto path.

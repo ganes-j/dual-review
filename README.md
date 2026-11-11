@@ -38,7 +38,7 @@ python3 lib/orchestrator.py --once --dry-run
 
 `config/allowlist.json` (copied from `config/allowlist.example.json`):
 
-- `watch` — repos polled each tick. Add repos here to have them reviewed.
+- `watch` — repos polled each tick. Add repos here to have them reviewed. An entry may end in a glob (`your-username/project-*`): each tick it is matched against the owner's unarchived repos, so a new matching repo is reviewed with no config edit. Every match must still pass `allow`/`deny`. Avoid a bare `owner/*` unless every repo under that owner should have its diffs sent to both models.
 - `allow` — the safety gate (owner globs, e.g. `your-username/*`). A watched repo must also pass this.
 - `deny` — hard-denied owners (e.g. your employer's org). Deny always wins on the auto path. A missing/empty `allow` or `deny` list fails closed (nothing runs).
 - `manual_allow` — exact `owner/name` repos (no globs) reachable **only** by an explicit manual run naming the exact repo and PR. Never polled. This is how a specific denied-owner PR is reviewed on demand; `deny` still blocks that repo on the auto path.

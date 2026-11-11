@@ -26,6 +26,14 @@ def list_open_prs(repo):
     return json.loads(out)
 
 
+def list_owner_repos(owner):
+    out = _run([
+        "gh", "repo", "list", owner, "--no-archived",
+        "--json", "nameWithOwner", "--limit", "1000",
+    ])
+    return [r["nameWithOwner"] for r in json.loads(out)]
+
+
 def list_reviews(repo, pr):
     out = _run(["gh", "api", "repos/{}/pulls/{}/reviews".format(repo, pr)])
     return json.loads(out)

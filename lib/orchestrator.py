@@ -1,4 +1,5 @@
 import argparse
+import fnmatch
 import json
 import os
 import sys
@@ -45,6 +46,36 @@ def watch_list(config_path):
         return []
     watch = cfg.get("watch")
     return list(watch) if isinstance(watch, list) else []
+
+
+def expand_watch(entries):
+    """Resolve `owner/pattern*` entries against the owner's current repos, in order, deduped.
+
+    New repos matching a glob are picked up on the next tick with no config edit.
+    Expansion widens only the candidate list; each repo still passes the scope gate.
+    """
+    repos = []
+    listed = {}
+    for entry in entries:
+        if not isinstance(entry, str):
+            continue
+        if "*" not in entry:
+            matches = [entry]
+        else:
+            owner = entry.split("/", 1)[0]
+            if owner not in listed:
+                try:
+                    listed[owner] = ghio.list_owner_repos(owner)
+                except ghio.GhError as exc:
+                    _log("SKIP glob %s: could not list %s repos (%s)" % (entry, owner, exc))
+                    listed[owner] = None
+            if listed[owner] is None:
+                continue
+            matches = [r for r in listed[owner] if fnmatch.fnmatchcase(r, entry)]
+        for repo in matches:
+            if repo not in repos:
+                repos.append(repo)
+    return repos
 
 
 def review_pr(repo, pr, diff, repo_dir, router_off):
@@ -105,7 +136,7 @@ def run_once(config_path=CONFIG_PATH, state_path=STATE_PATH, repo_dir=_ROOT,
              dry_run=False, force_pr=None, only_repo=None, only_pr=None, codex=False):
     manual_run = False
     if only_repo is None:
-        repos = watch_list(config_path)
+        repos = expand_watch(watch_list(config_path))
     else:
         if scope.is_allowed(only_repo, config_path):
             repos = [only_repo]

@@ -126,6 +126,55 @@ class TestOrchestrator(unittest.TestCase):
         orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp)
         orchestrator.ghio.gh_login.assert_not_called()
 
+    def _start(self, patches):
+        for p in patches:
+            p.start()
+        self.addCleanup(lambda: [p.stop() for p in patches])
+
+    def _repos_polled(self):
+        return [c.args[0] for c in orchestrator.ghio.list_open_prs.call_args_list]
+
+    def test_watch_glob_polls_every_matching_repo(self):
+        cfg = _cfg(self.tmp, ["your-username/watson-*"])
+        owned = ["your-username/watson-a", "your-username/other", "your-username/watson-b"]
+        self._start(self._patches([]) + [
+            mock.patch.object(orchestrator.ghio, "list_owner_repos", return_value=owned)])
+        orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp)
+        orchestrator.ghio.list_owner_repos.assert_called_once_with("your-username")
+        self.assertEqual(self._repos_polled(), ["your-username/watson-a", "your-username/watson-b"])
+
+    def test_watch_glob_expansion_still_passes_the_scope_gate(self):
+        cfg = _cfg(self.tmp, ["your-work-org/*"])
+        self._start(self._patches([self.pr]) + [
+            mock.patch.object(orchestrator.ghio, "list_owner_repos",
+                              return_value=["your-work-org/secret"])])
+        orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp)
+        orchestrator.ghio.list_open_prs.assert_not_called()
+        orchestrator.review_pr.assert_not_called()
+
+    def test_a_glob_that_cannot_be_listed_does_not_stop_exact_entries(self):
+        cfg = _cfg(self.tmp, ["your-username/watson-*", "your-username/dual-review"])
+        self._start(self._patches([]) + [
+            mock.patch.object(orchestrator.ghio, "list_owner_repos",
+                              side_effect=orchestrator.ghio.GhError("rate limited"))])
+        orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp)
+        self.assertEqual(self._repos_polled(), ["your-username/dual-review"])
+
+    def test_a_repo_named_exactly_and_by_glob_is_polled_once(self):
+        cfg = _cfg(self.tmp, ["your-username/watson-a", "your-username/watson-*"])
+        self._start(self._patches([]) + [
+            mock.patch.object(orchestrator.ghio, "list_owner_repos",
+                              return_value=["your-username/watson-a", "your-username/watson-b"])])
+        orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp)
+        self.assertEqual(self._repos_polled(), ["your-username/watson-a", "your-username/watson-b"])
+
+    def test_exact_entries_never_list_the_owner(self):
+        cfg = _cfg(self.tmp, ["your-username/dual-review"])
+        self._start(self._patches([]) + [
+            mock.patch.object(orchestrator.ghio, "list_owner_repos", return_value=[])])
+        orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp)
+        orchestrator.ghio.list_owner_repos.assert_not_called()
+
     def test_only_pr_reviews_matching_pr_and_leaves_others_untouched(self):
         cfg = _cfg(self.tmp, ["your-username/dual-review"])
         open_prs = [dict(self.pr, number=num) for num in (4, 5, 6)]
@@ -412,6 +461,17 @@ class TestManualAudit(unittest.TestCase):
             orchestrator.run_once(config_path=cfg, state_path=self.state, repo_dir=self.tmp,
                                   only_repo="your-work-org/manual-review", only_pr=5, codex=True)
         self.assertIn("your-work-org/manual-review#5", self._audit_text())
+
+
+class TestListOwnerRepos(unittest.TestCase):
+    def test_lists_unarchived_repos_by_full_name(self):
+        out = json.dumps([{"nameWithOwner": "your-username/a"}, {"nameWithOwner": "your-username/b"}])
+        with mock.patch.object(orchestrator.ghio, "_run", return_value=out) as run:
+            self.assertEqual(orchestrator.ghio.list_owner_repos("your-username"),
+                             ["your-username/a", "your-username/b"])
+        args = run.call_args.args[0]
+        self.assertIn("--no-archived", args)
+        self.assertIn("your-username", args)
 
 
 if __name__ == "__main__":
